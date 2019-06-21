@@ -20,38 +20,55 @@ using namespace boost;
 using namespace boost::asio;
 
 
-class CTalk_to_server :public boost::enable_shared_from_this<CTalk_to_server>,boost::noncopyable
-{
+class CTalk_to_server : public boost::enable_shared_from_this<CTalk_to_server>, boost::noncopyable {
 public:
-    CTalk_to_server(boost::asio::io_service &ios);
+    CTalk_to_server(boost::asio::io_service &ios, boost::asio::ssl::context &m,boost::asio::ip::tcp::resolver::iterator endpoint_iterator);
+
     ~CTalk_to_server();
-    static talk_to_server_ptr create_client(boost::asio::ip::tcp::endpoint ep,boost::asio::io_service &ios);
+
+    static talk_to_server_ptr
+    create_client(boost::asio::ip::tcp::endpoint ep, boost::asio::io_service &ios, boost::asio::ssl::context &m,boost::asio::ip::tcp::resolver::iterator endpoint_iterator);
+
     void start(boost::asio::ip::tcp::endpoint ep);
-    void handle_connect(const boost::system::error_code& err);
+
+    void handle_connect(const boost::system::error_code &err);
+
     void stop();
+
     bool started() const;
+
     void do_read();
+
     void do_write(const std::string &msg);
-    void handle_write(const boost::system::error_code &err,size_t bytes);
-    void handle_read(boost::shared_ptr<std::vector<char>> read_ptr,const boost::system::error_code& err,size_t bytes);
-    void set_receive_data(void* receivedata);
+
+    void handle_write(const boost::system::error_code &err, size_t bytes);
+
+    void handle_read(boost::shared_ptr<std::vector<char>> read_ptr, const boost::system::error_code &err, size_t bytes);
+
+    void set_receive_data(void *receivedata);
+
+    void handle_handshake(const boost::system::error_code &error);
+
+    void close();
+
     //void start_listen();
     //void handle_talk_to_server_thread();
-    void start_timer(const boost::system::error_code& err);
+    void start_timer(const boost::system::error_code &err);
+
 private:
-    boost::asio::io_service& m_service;
+    boost::asio::io_service &m_service;
     deadline_timer m_timer;
-    boost::asio::ip::tcp::socket m_socket;
+    //boost::asio::ip::tcp::socket m_socket;
+    ssl_socket m_socket;
     boost::asio::ip::tcp::endpoint m_ep;
-    enum {max_msg =  MAX_MSG_NUM};
+    enum {
+        max_msg = MAX_MSG_NUM
+    };
     bool m_bStart;
     char m_read_buffer[MAX_MSG];
     char m_write_buffer[MAX_MSG];
     ReceiveData m_receive_data;
-    //string m_ip;
-    //short m_port;
-
-   // boost::asio::strand m_strand;
+    boost::asio::ip::tcp::resolver::iterator m_endpoint_iterator;
 };
 
 #endif //HBAUDITFLOW_CTALK_TO_SERVER_H

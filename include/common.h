@@ -5,9 +5,11 @@
 #ifndef HBAUDITFLOW_COMMON_H
 #define HBAUDITFLOW_COMMON_H
 
-#define MAX_MSG_NUM 1024
+#include <boost/asio/ssl.hpp>
+
+#define MAX_MSG_NUM 4096
 #define THREAD_NUM 1
-#define MAX_MSG 1024
+#define MAX_MSG 4096
 
 class CTalk_to_client;
 typedef boost::shared_ptr<CTalk_to_client> client_ptr;
@@ -21,5 +23,7 @@ typedef boost::shared_ptr<CTalk_to_server>  talk_to_server_ptr;
 
 
 typedef std::vector<client_ptr> array_clients;
+
+typedef boost::asio::ssl::stream<boost::asio::ip::tcp::socket> ssl_socket;
 
 #endif //HBAUDITFLOW_COMMON_H

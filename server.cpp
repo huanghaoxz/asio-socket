@@ -5,16 +5,25 @@
 #include "hb_log4def.h"
 
 
-CServer::CServer(std::string ip, short port) : m_acceptor(service,
-                                                          ip::tcp::endpoint(ip::address::from_string(ip), port)) {
+CServer::CServer(std::string ip, short port,const asio::ssl::context::method& m) : m_acceptor(service,
+                                                          ip::tcp::endpoint(ip::address::from_string(ip), port)),
+                                               m_content(m) {
 }
+
+/*
+CServer::CServer(std::string ip, short port,const asio::ssl::context::method& m) : m_acceptor(service,
+                                                                                              ip::tcp::endpoint(ip::address::from_string(ip), port)),
+                                                                                   {
+}*/
+
 
 CServer::~CServer() {
 
 }
 
 void CServer::start() {
-    client_ptr client = CTalk_to_client::new_client(service);
+    //这里加上ssl
+    client_ptr client = CTalk_to_client::new_client(service,m_content);
     m_acceptor.async_accept(client->get_socket(), boost::bind(&CServer::handle_accept, this, client, _1));
     for (int i = 0; i < THREAD_NUM; ++i) {
         boost::thread(boost::bind(&CServer::handle_talk_to_client_thread, this));
@@ -22,10 +31,11 @@ void CServer::start() {
 }
 
 void CServer::handle_accept(client_ptr client, const boost::system::error_code &err) {
+    hbla_log_info("client count %d is connected", ++CTalk_to_client::clientnum);
     client->set_receive_data((void *) m_receive_data);
     client->set_client_changed();
     client->start();
-    client_ptr newclient = CTalk_to_client::new_client(service);
+    client_ptr newclient = CTalk_to_client::new_client(service,m_content);
     m_acceptor.async_accept(newclient->get_socket(), boost::bind(&CServer::handle_accept, this, newclient, _1));
 }
 
@@ -60,7 +70,7 @@ void CServer::stop_client(int fd) {
     boost::recursive_mutex::scoped_lock lk(m_cs);
     array_clients::iterator it = m_clients.begin();
     for (; it != m_clients.end(); ++it) {
-        if ((*it)->get_socket().native() == fd) {
+        if ((*it)->get_socket().lowest_layer().native() == fd) {
             (*it)->stop();
             m_clients.erase(it);
         }
@@ -76,9 +86,13 @@ void CServer::send_msg(int fd, std::string &msg) {
     boost::recursive_mutex::scoped_lock lk(m_cs);
     array_clients::iterator it = m_clients.begin();
     for (; it != m_clients.end(); ++it) {
-        if ((*it)->get_socket().native() == fd) {
+        if ((*it)->get_socket().lowest_layer().native() == fd) {
             (*it)->do_write(msg);
         }
     }
 }
 
+asio::ssl::context& CServer::context()
+{
+    return m_content;
+}

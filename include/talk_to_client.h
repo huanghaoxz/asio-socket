@@ -24,11 +24,11 @@ using namespace boost::asio;
 class CTalk_to_client:public boost::enable_shared_from_this<CTalk_to_client>,boost::noncopyable
  {
 public:
-    CTalk_to_client(boost::asio::io_service &service);
+    CTalk_to_client(boost::asio::io_service &service,boost::asio::ssl::context& m);
 
     ~CTalk_to_client();
 
-    static client_ptr new_client(boost::asio::io_service &service);
+    static client_ptr new_client(boost::asio::io_service &service,asio::ssl::context& m);
 
     void start();
 
@@ -41,15 +41,19 @@ public:
     void do_write(std::string &messsage);
     void handle_write(const boost::system::error_code& err,size_t bytes);
 
-    boost::asio::ip::tcp::socket &get_socket();
+    //boost::asio::ip::tcp::socket &get_socket();
+    ssl_socket::lowest_layer_type &get_socket();
 
     void set_client_changed();
 
     void set_receive_data(void* receivedata);
     static int clientnum;
     void del_client();
+    void handle_handshake(const boost::system::error_code& error);
+    void close();
 private:
-    boost::asio::ip::tcp::socket m_socket;
+    //boost::asio::ip::tcp::socket m_socket;
+    ssl_socket m_socket;
     bool m_bStart;
     enum {max_msg = MAX_MSG_NUM};
     ReceiveData m_receive_data;

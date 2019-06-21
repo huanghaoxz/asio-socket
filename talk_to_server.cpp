@@ -7,8 +7,12 @@
 #include "hb_log4def.h"
 
 //CTalk_to_server::CTalk_to_server() : m_socket(m_service),m_timer(m_service,boost::bind(&CTalk_to_server::start_timer,this)){
-CTalk_to_server::CTalk_to_server(boost::asio::io_service &ios) : m_service(ios), m_timer(ios), m_socket(ios) {
+CTalk_to_server::CTalk_to_server(boost::asio::io_service &ios, boost::asio::ssl::context &m,
+                                 boost::asio::ip::tcp::resolver::iterator endpoint_iterator) : m_service(ios),
+                                                                                               m_timer(ios),
+                                                                                               m_socket(ios, m) {
     m_bStart = false;
+    m_endpoint_iterator = endpoint_iterator;
     m_timer.expires_from_now(boost::posix_time::seconds(3));
     m_timer.async_wait(boost::bind(&CTalk_to_server::start_timer, this, boost::asio::placeholders::error));
 }
@@ -21,42 +25,67 @@ void CTalk_to_server::start_timer(const boost::system::error_code &err) {
 
     if (!err) {
         if (!m_bStart) {
-            hbla_log_info("timer reconnect  ...");
-            //m_socket.async_connect(m_ep, boost::bind(&CTalk_to_server::handle_connect, shared_from_this(),
-                                                    // boost::asio::placeholders::error));
-            m_socket.async_connect(m_ep, boost::bind(&CTalk_to_server::handle_connect, this,boost::asio::placeholders::error));
+            hbla_log_info("reconnect server ...");
+            if(!m_socket.lowest_layer().is_open())
+            {
+                m_socket.lowest_layer().async_connect(m_ep,
+                                                      boost::bind(&CTalk_to_server::handle_connect, shared_from_this(),
+                                                                  boost::asio::placeholders::error));
+            }
+        } else {
+            //hbla_log_info("start_timer %s", err.message().c_str());
+            //close();
         }
-    } else {
-        hbla_log_error("start_timer %s", err.message().c_str());
+        m_timer.expires_at(m_timer.expires_at() + posix_time::millisec(2000));
+        m_timer.async_wait(boost::bind(&CTalk_to_server::start_timer, this, boost::asio::placeholders::error));
     }
-    m_timer.expires_at(m_timer.expires_at() + posix_time::millisec(1000));
-    m_timer.async_wait(boost::bind(&CTalk_to_server::start_timer, this, boost::asio::placeholders::error));
 }
 
-talk_to_server_ptr CTalk_to_server::create_client(boost::asio::ip::tcp::endpoint ep, boost::asio::io_service &ios) {
-    talk_to_server_ptr new_(new CTalk_to_server(ios));
+talk_to_server_ptr CTalk_to_server::create_client(boost::asio::ip::tcp::endpoint ep, boost::asio::io_service &ios,
+                                                  boost::asio::ssl::context &m,
+                                                  boost::asio::ip::tcp::resolver::iterator endpoint_iterator) {
+    talk_to_server_ptr new_(new CTalk_to_server(ios, m, endpoint_iterator));
     new_->start(ep);
     return new_;
 }
 
 void CTalk_to_server::start(boost::asio::ip::tcp::endpoint ep) {
     m_ep = ep;
-    m_socket.async_connect(ep, boost::bind(&CTalk_to_server::handle_connect, shared_from_this(),
+#if 1
+    m_socket.lowest_layer().async_connect(ep, boost::bind(&CTalk_to_server::handle_connect, shared_from_this(),
+                                                          boost::asio::placeholders::error));
+#endif
+
+#if 0
+    boost::asio::async_connect(m_socket.lowest_layer(), m_endpoint_iterator,
+                               boost::bind(&CTalk_to_server::handle_connect, shared_from_this(),
                                            boost::asio::placeholders::error));
+#endif
 
 }
 
 void CTalk_to_server::handle_connect(const boost::system::error_code &err) {
     if (!err) {
         m_bStart = true;
-        hbla_log_info("%d connect server sucess", m_socket.native());
-        do_read();
+        hbla_log_info("%d connect server sucess", m_socket.lowest_layer().native());
+
+        m_socket.async_handshake(boost::asio::ssl::stream_base::client,
+                                 boost::bind(&CTalk_to_server::handle_handshake, shared_from_this(),
+                                             boost::asio::placeholders::error));
+
     } else {
         hbla_log_error("handle_connect err %s", err.message().c_str())
-        if (m_socket.is_open()) {
-            m_socket.close();
-        }
-        m_bStart = false;
+        close();
+    }
+}
+
+void CTalk_to_server::handle_handshake(const boost::system::error_code &error) {
+    if (!error) {
+        hbla_log_info("%d handle_handshake success", m_socket.lowest_layer().native());
+        do_read();
+    } else {
+        std::cout << "Handshake failed: " << error.message() << "\n";
+        close();
     }
 }
 
@@ -64,8 +93,7 @@ void CTalk_to_server::stop() {
 
     if (!m_bStart)
         return;
-    m_bStart = false;
-    m_socket.close();
+    close();
 }
 
 bool CTalk_to_server::started() const {
@@ -80,20 +108,21 @@ void CTalk_to_server::do_read() {
                                          boost::asio::placeholders::bytes_transferred()));
 }
 
-void CTalk_to_server::handle_read(boost::shared_ptr<std::vector<char>> read_ptr, const boost::system::error_code &err,
-                                  size_t bytes) {
+void
+CTalk_to_server::handle_read(boost::shared_ptr<std::vector<char>> read_ptr, const boost::system::error_code &err,
+                             size_t bytes) {
     if (!err)//没有错误
     {
         string message = "";
         message.assign(read_ptr->begin(), read_ptr->begin() + bytes);
         cout << "handle read" << message << endl;
-        m_receive_data(message, bytes, m_socket.native());
+        m_receive_data(message, bytes, m_socket.lowest_layer().native());
     } else {
-        hbla_log_error("handle_read %s", err.message().c_str());
-        if (m_socket.is_open()) {
-            m_socket.close();
-            m_bStart = false;
+        if(bytes!=0)//当bytes =0时表示，非阻塞套接字,读取时没有数据返回0,服务端断开连接 bytes =0
+        {
+            hbla_log_error("bytes:%d  %s", bytes, err.message().c_str());
         }
+        close();
     }
 }
 
@@ -110,10 +139,7 @@ void CTalk_to_server::do_write(const std::string &msg) {
 void CTalk_to_server::handle_write(const boost::system::error_code &err, size_t bytes) {
     if (err) {
         hbla_log_error("handle_write err %s", err.message().c_str());
-        if (m_socket.is_open()) {
-            m_socket.close();
-        }
-        m_bStart = false;
+        close();
     } else {
         do_read();
     }
@@ -121,6 +147,14 @@ void CTalk_to_server::handle_write(const boost::system::error_code &err, size_t 
 
 void CTalk_to_server::set_receive_data(void *receivedata) {
     m_receive_data = (ReceiveData) (receivedata);
+}
+
+void CTalk_to_server::close() {
+    if (m_socket.lowest_layer().is_open()) {
+        m_socket.lowest_layer().close();
+        //m_socket.shutdown();
+    }
+    m_bStart = false;
 }
 
 /*
